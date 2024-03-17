@@ -21,6 +21,7 @@
       [(null? stmts) state] ;no statements left (end of recursion)
       [(not (list? state)) state] ;state is singular (return statement/end of recursion)
       [(list? (current stmts)) (M_state (next_stmt stmts) (M_state (current stmts) state next) next)] ;current statement is more than one, split
+      [(eq? (current stmts) 'begin) (cons (M_state (cadr stmts) empty) state)]
       [(eq? (current stmts) 'var) (M_declare stmts state)]
       [(eq? (current stmts) '=) (M_assign stmts state)] 
       [(eq? (current stmts) 'return) (M_return stmts state)]

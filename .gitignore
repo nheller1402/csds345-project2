@@ -25,4 +25,7 @@ compiled/
 # Dependency tracking files
 *.dep
 
+#text documents for testing
+*.txt
+
 # End of https://www.toptal.com/developers/gitignore/api/backup,racket

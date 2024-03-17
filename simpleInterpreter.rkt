@@ -5,7 +5,7 @@
 ;calls Mstate for the total state of the program on the parsed version of the file
 (define interpret
   (lambda (filename)
-    (M_state (parser filename) empty)))
+    (M_state (parser filename) empty next)))
 
 ;;STATE FUNCTIONS
 ;abstractions for state functions
@@ -16,16 +16,16 @@
 ;stmts is a list of statements and state is a list of states
 ;when state becomes singular (return statement or end of file), it is returned
 (define M_state
-  (lambda (stmts state)
+  (lambda (stmts state next)
     (cond
       [(null? stmts) state] ;no statements left (end of recursion)
       [(not (list? state)) state] ;state is singular (return statement/end of recursion)
-      [(list? (current stmts)) (M_state (next stmts) (M_state (current stmts) state))] ;current statement is more than one, split
+      [(list? (current stmts)) (M_state (next stmts) (M_state (current stmts) state next) next)] ;current statement is more than one, split
       [(eq? (current stmts) 'var) (M_declare stmts state)]
       [(eq? (current stmts) '=) (M_assign stmts state)] 
       [(eq? (current stmts) 'return) (M_return stmts state)]
       [(eq? (current stmts) 'if) (M_if stmts state)]
-      [(eq? (current stmts) 'while) (M_while stmts state)]
+      [(eq? (current stmts) 'while) (M_while stmts state next)]
       [else (error 'stmterror "Unknown Statement")])))
 
 ;variable abstractions
@@ -68,17 +68,24 @@
 (define M_if
   (lambda (stmt state)
     (if (M_bool (condition stmt) state)
-        (M_state (stmt1 stmt) state)
+        (M_state (stmt1 stmt) state next)
         (if (null? (elif stmt))
             state
-            (M_state (stmt2 stmt) state)))))
+            (M_state (stmt2 stmt) state next)))))
 
 ; Returns a state that results after the execution of a while loop.
 (define M_while
-  (lambda (stmt state)
-    (if (M_bool (condition stmt) state)
-        (M_while stmt (M_state (loop_body stmt) state))
-        state)))
+  (lambda (stmt state next)
+    (loop (condition stmt) (car (loop_body stmt)) state next)))
+
+
+;helper function for goto constructs
+(define loop
+  (lambda (cond body state next)
+    (if (M_bool cond state)
+        (M_state body state (lambda (state1) (loop cond body state1 next)))
+        next)))
+
 
 ;;STATE HELPER FUNCTIONS
 (define declared?

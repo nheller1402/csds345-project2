@@ -5,7 +5,7 @@
 ;calls Mstate for the total state of the program on the parsed version of the file
 (define interpret
   (lambda (filename)
-    (M_state (parser filename) empty (lambda (return) return))))
+    (M_state (parser filename) empty (lambda (result) result))))
 
 ;;STATE FUNCTIONS
 ;abstractions for state functions
@@ -21,11 +21,11 @@
       [(null? stmts) state] ;no statements left (end of recursion)
       [(not (list? state)) state] ;state is singular (return statement/end of recursion)
       [(list? (current stmts)) (M_state (next_stmt stmts) (M_state (current stmts) state next) next)] ;current statement is more than one, split
-      [(eq? (current stmts) 'begin) (cons (M_state (cadr stmts) empty) state)]
+      [(eq? (current stmts) 'begin) (cons (M_state (cadr stmts) empty next) state)]
       [(eq? (current stmts) 'var) (M_declare stmts state)]
       [(eq? (current stmts) '=) (M_assign stmts state)] 
       [(eq? (current stmts) 'return) (M_return stmts state)]
-      [(eq? (current stmts) 'if) (M_if stmts state)]
+      [(eq? (current stmts) 'if) (M_if stmts state next)]
       [(eq? (current stmts) 'while) (M_while stmts state next)]
       [else (error 'stmterror "Unknown Statement")])))
 

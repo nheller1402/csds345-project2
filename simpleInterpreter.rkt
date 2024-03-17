@@ -5,13 +5,13 @@
 ;calls Mstate for the total state of the program on the parsed version of the file
 (define interpret
   (lambda (filename)
-    (M_state (parser filename) empty next)))
+    (M_state (parser filename) empty (lambda (return) return))))
 
 ;;STATE FUNCTIONS
 ;abstractions for state functions
 (define empty '(()()) )
 (define current car) 
-(define next cdr)
+(define next_stmt cdr)
 
 ;stmts is a list of statements and state is a list of states
 ;when state becomes singular (return statement or end of file), it is returned
@@ -20,7 +20,7 @@
     (cond
       [(null? stmts) state] ;no statements left (end of recursion)
       [(not (list? state)) state] ;state is singular (return statement/end of recursion)
-      [(list? (current stmts)) (M_state (next stmts) (M_state (current stmts) state next) next)] ;current statement is more than one, split
+      [(list? (current stmts)) (M_state (next_stmt stmts) (M_state (current stmts) state next) next)] ;current statement is more than one, split
       [(eq? (current stmts) 'var) (M_declare stmts state)]
       [(eq? (current stmts) '=) (M_assign stmts state)] 
       [(eq? (current stmts) 'return) (M_return stmts state)]
@@ -66,7 +66,7 @@
 (define loop_body cddr)
 ; Returns a state that results after the execution of an if statement.
 (define M_if
-  (lambda (stmt state)
+  (lambda (stmt state next)
     (if (M_bool (condition stmt) state)
         (M_state (stmt1 stmt) state next)
         (if (null? (elif stmt))
@@ -93,7 +93,7 @@
     (cond
       [(null? varlist) #f]
       [(eq? var (current varlist)) #t]
-      [else (declared? var (next varlist))])))
+      [else (declared? var (next_stmt varlist))])))
 
 ;adds a variable and a value to tables
 (define add_var
@@ -114,9 +114,9 @@
   (lambda (var varlist vallist)
     (cond
       [(null? varlist) (cons varlist (cons vallist null))]
-      [(eq? var (current varlist)) (cons (next varlist) (cons (next vallist) null))]
-      [else (cons (cons (current varlist) (car (remove_var_helper var (next varlist) (next vallist))))
-                  (cons (cons (current vallist) (ret_val (remove_var_helper var (next varlist) (next vallist)))) null))])))
+      [(eq? var (current varlist)) (cons (next_stmt varlist) (cons (next_stmt vallist) null))]
+      [else (cons (cons (current varlist) (car (remove_var_helper var (next_stmt varlist) (next_stmt vallist))))
+                  (cons (cons (current vallist) (ret_val (remove_var_helper var (next_stmt varlist) (next_stmt vallist)))) null))])))
 
 ;;EVALUATION FUNCTIONS
 ;abstractions for eval functions

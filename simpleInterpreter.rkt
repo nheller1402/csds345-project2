@@ -5,23 +5,22 @@
 ;calls Mstate for the total state of the program on the parsed version of the file
 (define interpret
   (lambda (filename)
-    (M_state (parser filename) empty (lambda (result) result))))
+    (M_state (parser filename) empty (lambda (state1) state1))))
 
 ;;STATE FUNCTIONS
 ;abstractions for state functions
 (define empty '(()()) )
 (define current car) 
-(define next_stmt cdr)
+(define nextstmt cdr)
 
 ;stmts is a list of statements and state is a list of states
 ;when state becomes singular (return statement or end of file), it is returned
 (define M_state
   (lambda (stmts state next)
     (cond
-      [(null? stmts) state] ;no statements left (end of recursion)
-      [(not (list? state)) state] ;state is singular (return statement/end of recursion)
-      [(list? (current stmts)) (M_state (next_stmt stmts) (M_state (current stmts) state next) next)] ;current statement is more than one, split
-      [(eq? (current stmts) 'begin) (cons (M_state (cadr stmts) empty next) state)]
+      [(null? stmts) (next state)] ;no statements left (end of recursion)
+      [(not (list? state)) (next state)] ;state is singular (return statement/end of recursion)
+      [(list? (current stmts)) (M_state (nextstmt stmts) (M_state (current stmts) state next) next)] ;current statement is more than one, split
       [(eq? (current stmts) 'var) (M_declare stmts state)]
       [(eq? (current stmts) '=) (M_assign stmts state)] 
       [(eq? (current stmts) 'return) (M_return stmts state)]
@@ -77,16 +76,14 @@
 ; Returns a state that results after the execution of a while loop.
 (define M_while
   (lambda (stmt state next)
-    (loop (condition stmt) (car (loop_body stmt)) state next)))
-
+    (loop (condition stmt) (loop_body stmt) state next)))
 
 ;helper function for goto constructs
 (define loop
-  (lambda (cond body state next)
-    (if (M_bool cond state)
-        (M_state body state (lambda (state1) (loop cond body state1 next)))
-        next)))
-
+  (lambda (condi body state next)
+    (if (M_bool condi state)
+        (M_state body state (lambda (state1) (loop condi body state1 next)))
+        (next state))))
 
 ;;STATE HELPER FUNCTIONS
 (define declared?
@@ -94,7 +91,7 @@
     (cond
       [(null? varlist) #f]
       [(eq? var (current varlist)) #t]
-      [else (declared? var (next_stmt varlist))])))
+      [else (declared? var (nextstmt varlist))])))
 
 ;adds a variable and a value to tables
 (define add_var
@@ -115,9 +112,9 @@
   (lambda (var varlist vallist)
     (cond
       [(null? varlist) (cons varlist (cons vallist null))]
-      [(eq? var (current varlist)) (cons (next_stmt varlist) (cons (next_stmt vallist) null))]
-      [else (cons (cons (current varlist) (car (remove_var_helper var (next_stmt varlist) (next_stmt vallist))))
-                  (cons (cons (current vallist) (ret_val (remove_var_helper var (next_stmt varlist) (next_stmt vallist)))) null))])))
+      [(eq? var (current varlist)) (cons (nextstmt varlist) (cons (nextstmt vallist) null))]
+      [else (cons (cons (current varlist) (car (remove_var_helper var (nextstmt varlist) (nextstmt vallist))))
+                  (cons (cons (current vallist) (ret_val (remove_var_helper var (nextstmt varlist) (nextstmt vallist)))) null))])))
 
 ;;EVALUATION FUNCTIONS
 ;abstractions for eval functions

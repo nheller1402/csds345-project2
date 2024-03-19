@@ -9,7 +9,7 @@
 
 ;;STATE FUNCTIONS
 ;abstractions for state functions
-(define empty '(()()) )
+(define empty '(()()))
 (define current car) 
 (define next_stmt cdr)
 
@@ -21,13 +21,30 @@
       [(null? stmts) state] ;no statements left (end of recursion)
       [(not (list? state)) state] ;state is singular (return statement/end of recursion)
       [(list? (current stmts)) (M_state (next_stmt stmts) (M_state (current stmts) state next) next)] ;current statement is more than one, split
-      [(eq? (current stmts) 'begin) (cons (M_state (cadr stmts) empty next) state)]
+      [(eq? (current stmts) 'begin) (M_state (next_stmt stmts) (create_block state) next)]
       [(eq? (current stmts) 'var) (M_declare stmts state)]
       [(eq? (current stmts) '=) (M_assign stmts state)] 
       [(eq? (current stmts) 'return) (M_return stmts state)]
       [(eq? (current stmts) 'if) (M_if stmts state next)]
       [(eq? (current stmts) 'while) (M_while stmts state next)]
       [else (error 'stmterror "Unknown Statement")])))
+
+
+;block abstractions
+(define outer_block cddr)
+(define return_block caddr)
+
+; Creates a new layer for the state.
+(define create_block
+  (lambda (state)
+    (list null null state)))
+
+; Pops the front (most recent) layer from the state.
+(define pop_block
+  (lambda (state)
+    (if (null? (outer_block state))
+        (error 'breakerror "No outer block")
+        (return_block state))))
 
 ;variable abstractions
 (define var_name cadr)
@@ -42,12 +59,24 @@
 ; State access abstractions
 (define state_vars car)
 (define state_vals cadr)
+
 ;assigns a variable
+;use of set-box! means it can have side effects
 (define M_assign
   (lambda (stmt state)
+    (call/cc
+     (lambda (end)
+       (assign_var!
+        (var_name stmt) (M_value (var_value stmt) state) state state)))))
+;end is the initial full state that gets passed back
+;state is the current working state for recursion
+(define assign_var!
+  (lambda (var value state end)
     (cond
-      [(not (declared? (var_name stmt) (state_vars state))) (error 'assignerror "Undeclared Variable")]
-      [else (add_var (var_name stmt) (M_value (var_value stmt) state) (remove_var (var_name stmt) state))])))
+      [(equal? state empty) (error 'varerror "Variable not declared: ~a" var)]
+      [(null? (state_vars state)) (assign_var! var value (pop_block state) end)];not in current scope, check outer
+      [(eq? var (car (state_vars state))) (begin (set-box! (car (state_vals state)) value) end)]
+      [else (assign_var! var value (cons (cdr (state_vars state)) (cons (cdr (state_vals state)) (cddr state))) end)])))
 
 ;defines a return value
 ;replaces #t and #f
@@ -100,8 +129,9 @@
 (define add_var
   (lambda (var val state)
     (cond
-      [(declared? var (state_vals state)) (error 'declareerror "Variable already declared")]
-      [else (cons (cons var (state_vars state)) (cons (cons val (state_vals state)) null))])))
+      [(declared? var state) (error 'declerror "Variable already declared: ~a" var)]
+      [(null? (cddr state)) (list (cons var (state_vars state)) (cons (box val) (state_vals state)))]
+      [else (list (cons var (state_vars state)) (cons (box val) (state_vals state)) (pop_block state))])))
 
 ; Removes a variable and its corresponding value from the state, if present.
 ; Otherwise, the state is unchanged.
@@ -189,14 +219,12 @@
 ;uses two abstractions
 (define getvars car)
 (define getvals cadr)
+
 (define findvar
   (lambda (var state)
-    (findvarhelper var (getvars state) (getvals state))))
-
-(define findvarhelper
-  (lambda (var varlist vallist)
     (cond
-      [(null? varlist) (error 'declarerror "Undeclared Variable")]
-      [(and (eq? var (car varlist)) (void? (car vallist))) (error 'assignerror "Unassigned Variable")]
-      [(eq? var (car varlist)) (car vallist)] ;returns val associated with var
-      [else (findvarhelper var (cdr varlist) (cdr vallist))])))
+      [(equal? state empty) (error 'varerror "Variable not declared: ~a" var)]
+      [(null? (getvars state)) (findvar var (pop_block state))]
+      [(and (eq? var (car (getvars state))) (void? (unbox (car (getvals state))))) (error 'varerror "Variable not assigned: ~a" var)]
+      [(eq? var (car (getvars state))) (unbox (car (getvals state)))]
+      [else (findvar var (cons (cdr (getvars state)) (cons (cdr (getvals state)) (cddr state))))])))

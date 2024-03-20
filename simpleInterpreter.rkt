@@ -5,7 +5,7 @@
 ;calls Mstate for the total state of the program on the parsed version of the file
 (define interpret
   (lambda (filename)
-    (M_state (parser filename) empty (lambda (result) result))))
+    (M_state (parser filename) empty (lambda (state1) state1))))
 
 ;;STATE FUNCTIONS
 ;abstractions for state functions
@@ -18,8 +18,8 @@
 (define M_state
   (lambda (stmts state next)
     (cond
-      [(null? stmts) state] ;no statements left (end of recursion)
-      [(not (list? state)) state] ;state is singular (return statement/end of recursion)
+      [(null? stmts) (next state)] ;no statements left (end of recursion)
+      [(not (list? state)) (next state)] ;state is singular (return statement/end of recursion)
       [(list? (current stmts)) (M_state (next_stmt stmts) (M_state (current stmts) state next) next)] ;current statement is more than one, split
       [(eq? (current stmts) 'begin) (M_state (next_stmt stmts) (create_block state) next)]
       [(eq? (current stmts) 'var) (M_declare stmts state)]
@@ -106,15 +106,15 @@
 ; Returns a state that results after the execution of a while loop.
 (define M_while
   (lambda (stmt state next)
-    (loop (condition stmt) (car (loop_body stmt)) state next)))
+    (loop (condition stmt) (loop_body stmt) state next)))
 
 
 ;helper function for goto constructs
 (define loop
-  (lambda (cond body state next)
-    (if (M_bool cond state)
-        (M_state body state (lambda (state1) (loop cond body state1 next)))
-        next)))
+  (lambda (condi body state next)
+    (if (M_bool condi state)
+        (M_state body state (lambda (state1) (loop condi body state1 next)))
+        (next state))))
 
 
 ;;STATE HELPER FUNCTIONS

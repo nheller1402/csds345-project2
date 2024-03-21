@@ -5,7 +5,15 @@
 ;calls Mstate for the total state of the program on the parsed version of the file
 (define interpret
   (lambda (filename)
-    (M_state (parser filename) empty (lambda (state1) state1))))
+    (syntax-tree (parser filename) empty)))
+
+(define syntax-tree
+  (lambda (stmts state)
+    (call/cc
+     (lambda (return)
+       (if (null? stmts)
+           state
+           (syntax-tree (next_stmt stmts) (M_state (current stmts) state return (lambda (v1) (error 'error "Improper usage of continue")) (lambda (v2) (error 'error "Improper usage of break")) (lambda (v3) (error 'error "Improper usage of throw")))))))))
 
 ;;STATE FUNCTIONS
 ;abstractions for state functions
@@ -16,17 +24,20 @@
 ;stmts is a list of statements and state is a list of states
 ;when state becomes singular (return statement or end of file), it is returned
 (define M_state
-  (lambda (stmts state next)
+  (lambda (stmts state return continue break throw)
     (cond
-      [(null? stmts) (next state)] ;no statements left (end of recursion)
-      [(not (list? state)) (next state)] ;state is singular (return statement/end of recursion)
-      [(list? (current stmts)) (M_state (next_stmt stmts) (M_state (current stmts) state next) next)] ;current statement is more than one, split
-      [(eq? (current stmts) 'begin) (M_state (next_stmt stmts) (create_block state) next)]
+      [(eq? (current stmts) 'continue) (continue state)]
+      [(eq? (current stmts) 'break) (break (pop_block state))]
+      [(eq? (current stmts) 'throw) (throw (add_var 'exception (M_value (cadr stmts) state) state))]
+      [(eq? (current stmts) 'try) (M_try stmts state return continue break throw)]
+      [(eq? (current stmts) 'catch) (M_catch stmts state return continue break throw)]
+      [(eq? (current stmts) 'finally) (M_finally stmts state return continue break throw)]
+      [(eq? (current stmts) 'begin) (M_block stmts state return continue break throw)]
       [(eq? (current stmts) 'var) (M_declare stmts state)]
       [(eq? (current stmts) '=) (M_assign stmts state)] 
-      [(eq? (current stmts) 'return) (M_return stmts state)]
-      [(eq? (current stmts) 'if) (M_if stmts state next)]
-      [(eq? (current stmts) 'while) (M_while stmts state next)]
+      [(eq? (current stmts) 'return) (return (M_return stmts state))]
+      [(eq? (current stmts) 'if) (M_if stmts state return continue break throw)]
+      [(eq? (current stmts) 'while) (M_while stmts state return continue break throw)]
       [else (error 'stmterror "Unknown Statement")])))
 
 
@@ -88,6 +99,76 @@
       [(M_bool (ret_val stmt) state) 'true]
       [else 'false])))
 
+;block function to change states for blocks
+(define M_block
+  (lambda (stmt state return continue break throw)
+    (cond
+      [(null? stmt) (pop_block state)]
+      [(eq? (current stmt) 'begin) (M_block (next_stmt stmt) (create_block state) return continue break throw)]
+      [else (M_block (next_stmt stmt) (M_state (current stmt) state return continue break throw) return continue break throw)])))
+
+;returns state after try block
+(define M_try
+  (lambda (stmts state return continue break throw)
+    (cond
+      ((and (null? (catch-block stmts)) (null? (finally-block stmts))) (error 'error "try without catch and finally"))
+      (else (M_finally (finally-block stmts) (M_catch (catch-block stmts) (call/cc (lambda (throw) (try-block stmts (cadr stmts) state return continue break throw))) return continue break throw) return continue break throw)))))
+
+;helper function to check for return and breaks in try loop
+(define try-block
+  (lambda (try stmt state return continue break throw)
+    (cond
+      ((null? stmt) state)
+      ((eq? 'return (car (current stmt))) (M_state (current stmt) (M_finally (finally-block try) state return continue break throw) return continue break throw))
+      ((eq? 'break (car (current stmt))) (M_state (current stmt) (M_finally (finally-block try) state return continue break throw) return continue break throw))
+      (else (try-block try (next_stmt stmt) (M_state (current stmt) state return continue break throw) return continue break throw)))))
+
+;returns state after catch block
+(define M_catch
+  (lambda (stmts state return continue break throw)
+       (cond
+         ((null? stmts) state)
+         ((and (eq? (current stmts) 'catch) (declared? 'exception state)) (M_catch (caddr stmts) (rename-exception-variable (caadr stmts) state) return continue break throw))
+         ((eq? (current stmts) 'catch) state)
+         (else (M_catch (next_stmt catch-block) (M_state (current stmts) state return continue break throw) return continue break throw)))))
+
+;helper function to return statements in catch block
+(define catch-block
+  (lambda (stmt)
+    (cond
+      ((null? (caddr stmt)) '())
+      (else (caddr stmt)))))
+
+;used to rename the variable that caused exception to e
+(define rename-exception-variable
+  (lambda (exception state)
+    (cons (rename-exception-helper exception (car state)) (cdr state))))
+
+;helper function to rename exception variable
+(define rename-exception-helper
+  (lambda (e current-layer)
+    (cond
+      ((null? current-layer) '())
+      ((eq? (caar current-layer) 'exception) (cons (cons e (cons (cadar current-layer) '())) (cdr current-layer)))
+      (else (cons (car current-layer) (rename-exception-helper e (cdr current-layer))))))) 
+
+;returns state after finally block
+(define M_finally
+  (lambda (stmt state return continue break throw)
+    (cond
+      ((null? stmt) state)
+      (else (M_finally (next_stmt stmt) (M_state (current stmt) state return continue break throw) return continue break throw)))))
+
+
+
+;helper function to return statements in finally block
+(define finally-block
+  (lambda (stmt)
+    (cond
+      ((null? (cadddr stmt)) '())
+      (else (cadr (cadddr stmt))))))
+
+
 ; If-statement & while-loop abstractions
 (define condition cadr)
 (define stmt1 caddr)
@@ -96,25 +177,22 @@
 (define loop_body cddr)
 ; Returns a state that results after the execution of an if statement.
 (define M_if
-  (lambda (stmt state next)
+  (lambda (stmt state return continue break throw)
     (if (M_bool (condition stmt) state)
-        (M_state (stmt1 stmt) state next)
+        (M_state (stmt1 stmt) state return continue break throw)
         (if (null? (elif stmt))
             state
-            (M_state (stmt2 stmt) state next)))))
+            (M_state (stmt2 stmt) state return continue break throw)))))
+
 
 ; Returns a state that results after the execution of a while loop.
 (define M_while
-  (lambda (stmt state next)
-    (loop (condition stmt) (loop_body stmt) state next)))
-
-
-;helper function for goto constructs
-(define loop
-  (lambda (condi body state next)
-    (if (M_bool condi state)
-        (M_state body state (lambda (state1) (loop condi body state1 next)))
-        (next state))))
+  (lambda (stmt state return continue break throw)
+    (call/cc
+     (lambda (break)
+       (if (M_bool (condition stmt) state)
+           (M_state stmt (call/cc (lambda (continue) (M_state (car (loop_body stmt)) state return continue break throw))) return continue break throw)
+           state)))))
 
 
 ;;STATE HELPER FUNCTIONS

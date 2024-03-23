@@ -35,7 +35,7 @@
       [(eq? (current stmts) 'begin) (M_block stmts state return continue break throw)]
       [(eq? (current stmts) 'var) (M_declare stmts state)]
       [(eq? (current stmts) '=) (M_assign stmts state)] 
-      [(eq? (current stmts) 'return) (return (M_return stmts state))]
+      [(eq? (current stmts) 'return) (M_return stmts state)]
       [(eq? (current stmts) 'if) (M_if stmts state return continue break throw)]
       [(eq? (current stmts) 'while) (M_while stmts state return continue break throw)]
       [else (error 'stmterror "Unknown Statement")])))
@@ -126,11 +126,19 @@
 ;returns state after catch block
 (define M_catch
   (lambda (stmts state return continue break throw)
-       (cond
+    (cond
          ((null? stmts) state)
-         ((and (eq? (current stmts) 'catch) (declared? 'exception state)) (M_catch (caddr stmts) (rename-exception-variable (caadr stmts) state) return continue break throw))
+         ((and (eq? (current stmts) 'catch) (declared? 'exception (car state))) (M_catch (caddr stmts) (rename-exception-variable (caadr stmts) state) return continue break throw))
          ((eq? (current stmts) 'catch) state)
-         (else (M_catch (next_stmt catch-block) (M_state (current stmts) state return continue break throw) return continue break throw)))))
+         (else (M_state (current stmts) state return continue break throw)))))
+
+;renames exception variable to e
+(define rename-exception-variable
+  (lambda (exception state)
+    (cond
+      ((null? state) '())
+      ((eq? (caar state) 'exception) (cons (cons 'e (cdar state)) (cdr state)))
+      (else state))))
 
 ;helper function to return statements in catch block
 (define catch-block
@@ -139,27 +147,12 @@
       ((null? (caddr stmt)) '())
       (else (caddr stmt)))))
 
-;used to rename the variable that caused exception to e
-(define rename-exception-variable
-  (lambda (exception state)
-    (cons (rename-exception-helper exception (car state)) (cdr state))))
-
-;helper function to rename exception variable
-(define rename-exception-helper
-  (lambda (e current-layer)
-    (cond
-      ((null? current-layer) '())
-      ((eq? (caar current-layer) 'exception) (cons (cons e (cons (cadar current-layer) '())) (cdr current-layer)))
-      (else (cons (car current-layer) (rename-exception-helper e (cdr current-layer))))))) 
-
 ;returns state after finally block
 (define M_finally
   (lambda (stmt state return continue break throw)
     (cond
       ((null? stmt) state)
       (else (M_finally (next_stmt stmt) (M_state (current stmt) state return continue break throw) return continue break throw)))))
-
-
 
 ;helper function to return statements in finally block
 (define finally-block
@@ -168,13 +161,13 @@
       ((null? (cadddr stmt)) '())
       (else (cadr (cadddr stmt))))))
 
-
 ; If-statement & while-loop abstractions
 (define condition cadr)
 (define stmt1 caddr)
 (define elif cdddr)
 (define stmt2 cadddr)
 (define loop_body cddr)
+
 ; Returns a state that results after the execution of an if statement.
 (define M_if
   (lambda (stmt state return continue break throw)

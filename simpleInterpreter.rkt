@@ -7,6 +7,7 @@
   (lambda (filename)
     (syntax-tree (parser filename) empty)))
 
+;defines the syntax tree with breakpoints for the program
 (define syntax-tree
   (lambda (stmts state)
     (call/cc
@@ -133,19 +134,23 @@
          (else (M_state (current stmts) state return continue break throw)))))
 
 ;renames exception variable to e
+(define exception_stmt caar)
+
 (define rename-exception-variable
   (lambda (exception state)
     (cond
       ((null? state) '())
-      ((eq? (caar state) 'exception) (cons (cons 'e (cdar state)) (cdr state)))
+      ((eq? (exception_stmt state) 'exception) (cons (cons 'e (cdar state)) (cdr state)))
       (else state))))
 
+(define catch_stmt caddr)
+(define finally_stmt cadddr)
 ;helper function to return statements in catch block
 (define catch-block
   (lambda (stmt)
     (cond
-      ((null? (caddr stmt)) '())
-      (else (caddr stmt)))))
+      ((null? (catch_stmt stmt)) '())
+      (else (catch_stmt stmt)))))
 
 ;returns state after finally block
 (define M_finally
@@ -158,8 +163,8 @@
 (define finally-block
   (lambda (stmt)
     (cond
-      ((null? (cadddr stmt)) '())
-      (else (cadr (cadddr stmt))))))
+      ((null? (finally_stmt stmt)) '())
+      (else (cadr (finally_stmt stmt))))))
 
 ; If-statement & while-loop abstractions
 (define condition cadr)
@@ -283,8 +288,6 @@
 (define var?
   (lambda (x)
     (not (or (number? x) (or (pair? x) (null? x))))))
-
-;;HELPER FUNCTIONS
 
 ;searches variable list for a variable and returns its value
 ;uses two abstractions

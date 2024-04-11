@@ -28,6 +28,7 @@
 (define empty '(()()))
 (define current car) 
 (define next_stmt cdr)
+(define throw_stmt cadr)
 
 ;stmts is a list of statements and state is a list of states
 ;when state becomes singular (return statement or end of file), it is returned
@@ -36,7 +37,7 @@
     (cond
       [(eq? (current stmts) 'continue) (continue state)]
       [(eq? (current stmts) 'break) (break (pop_block state))]
-      [(eq? (current stmts) 'throw) (throw (add_var 'exception (M_value (cadr stmts) state) state))]
+      [(eq? (current stmts) 'throw) (throw (add_var 'exception (M_value (throw_stmt stmts) state) state))]
       [(eq? (current stmts) 'try) (M_try stmts state return continue break throw)]
       [(eq? (current stmts) 'catch) (M_catch stmts state return continue break throw)]
       [(eq? (current stmts) 'finally) (M_finally stmts state return continue break throw)]
@@ -97,7 +98,7 @@
       [(equal? state empty) (error 'varerror "Variable not declared: ~a" var)]
       [(null? (state_vars state)) (assign_var! var value (pop_block state) end)];not in current scope, check outer
       [(eq? var (car (state_vars state))) (begin (set-box! (car (state_vals state)) value) end)]
-      [else (assign_var! var value (cons (cdr (state_vars state)) (cons (cdr (state_vals state)) (cddr state))) end)])))
+      [else (assign_var! var value (cons (cdr (state_vars state)) (cons (cdr (state_vals state)) (outer_block state))) end)])))
 
 ;defines a return value
 ;replaces #t and #f
@@ -118,11 +119,13 @@
       [else (M_block (next_stmt stmt) (M_state (current stmt) state return continue break throw) return continue break throw)])))
 
 ;returns state after try block
+(define try_body cadr)
+
 (define M_try
   (lambda (stmts state return continue break throw)
     (cond
       ((and (null? (catch-block stmts)) (null? (finally-block stmts))) (error 'error "try without catch and finally"))
-      (else (M_finally (finally-block stmts) (M_catch (catch-block stmts) (call/cc (lambda (throw) (try-block stmts (cadr stmts) state return continue break throw))) return continue break throw) return continue break throw)))))
+      (else (M_finally (finally-block stmts) (M_catch (catch-block stmts) (call/cc (lambda (throw) (try-block stmts (try_body stmts) state return continue break throw))) return continue break throw) return continue break throw)))))
 
 ;helper function to check for return and breaks in try loop
 (define try-block
@@ -134,28 +137,34 @@
       (else (try-block try (next_stmt stmt) (M_state (current stmt) state return continue break throw) return continue break throw)))))
 
 ;returns state after catch block
+(define catch_body caddr)
+(define exception caadr)
 (define M_catch
   (lambda (stmts state return continue break throw)
     (cond
          ((null? stmts) state)
-         ((and (eq? (current stmts) 'catch) (declared? 'exception (car state))) (M_catch (caddr stmts) (rename-exception-variable (caadr stmts) state) return continue break throw))
+         ((and (eq? (current stmts) 'catch) (declared? 'exception (car state))) (M_catch (catch_body stmts) (rename-exception-variable (exception stmts) state) return continue break throw))
          ((eq? (current stmts) 'catch) state)
          (else (M_state (current stmts) state return continue break throw)))))
 
 ;renames exception variable to e
+(define exception-flag caar)
+(define exception-val cdar)
+
 (define rename-exception-variable
   (lambda (exception state)
     (cond
       ((null? state) '())
-      ((eq? (caar state) 'exception) (cons (cons 'e (cdar state)) (cdr state)))
+      ((eq? (exception-flag state) 'exception) (cons (cons 'e (exception-val state)) (cdr state)))
       (else state))))
 
 ;helper function to return statements in catch block
+
 (define catch-block
   (lambda (stmt)
     (cond
-      ((null? (caddr stmt)) '())
-      (else (caddr stmt)))))
+      ((null? (catch_body stmt)) '())
+      (else (catch_body stmt)))))
 
 ;returns state after finally block
 (define M_finally
@@ -165,11 +174,13 @@
       (else (M_finally (next_stmt stmt) (M_state (current stmt) state return continue break throw) return continue break throw)))))
 
 ;helper function to return statements in finally block
+(define finally-body cadddr)
+(define next-block cadr)
 (define finally-block
   (lambda (stmt)
     (cond
-      ((null? (cadddr stmt)) '())
-      (else (cadr (cadddr stmt))))))
+      ((null? (finally_body stmt)) '())
+      (else (next-block (finally_body stmt))))))
 
 ; If-statement & while-loop abstractions
 (define condition cadr)
@@ -211,7 +222,7 @@
   (lambda (var val state)
     (cond
       [(declared? var state) (error 'declerror "Variable already declared: ~a" var)]
-      [(null? (cddr state)) (list (cons var (state_vars state)) (cons (box val) (state_vals state)))]
+      [(null? (outer_block state)) (list (cons var (state_vars state)) (cons (box val) (state_vals state)))]
       [else (list (cons var (state_vars state)) (cons (box val) (state_vals state)) (pop_block state))])))
 
 ; Removes a variable and its corresponding value from the state, if present.
@@ -309,20 +320,24 @@
       [(null? (getvars state)) (findvar var (pop_block state))]
       [(and (eq? var (car (getvars state))) (void? (unbox (car (getvals state))))) (error 'varerror "Variable not assigned: ~a" var)]
       [(eq? var (car (getvars state))) (unbox (car (getvals state)))]
-      [else (findvar var (cons (cdr (getvars state)) (cons (cdr (getvals state)) (cddr state))))])))
+      [else (findvar var (cons (cdr (getvars state)) (cons (cdr (getvals state)) (outer_block state))))])))
 
 
 ;adds the function variable to state
+(define func-name cadr)
+(define func-body cddr)
+(define func-end cdddr)
 (define M_function
   (lambda (stmt state return break continue throw)
     (cond
-      ((null? (cdddr stmt)) state)
-      (else (add_var (cadr stmt) (cddr stmt) state)))))
+      ((null? (func-end stmt)) state)
+      (else (add_var (func-name stmt) (func-body stmt) state)))))
 
 ;evaluates the call function
+(define call-name cadr)
 (define M_call
   (lambda (stmt state)
-    (evaluate_call_body (cadr (findvar (cadr stmt) state)) (addParameter (findvar (cadr stmt) state) (evaluateParameter (cddr stmt) state) (append (cons empty (findScope (cadr stmt) state)) state)))))
+    (evaluate_call_body (call-name (findvar (func-name stmt) state)) (addParameter (findvar (func-name stmt) state) (evaluateParameter (cddr stmt) state) (append (cons empty (findScope (func-name stmt) state)) state)))))
 
 ;helper function to find the scope of a variable
 (define findScope
@@ -333,18 +348,19 @@
       (else (findScope function (cdr state))))))
 
 ;function to evaluate the body of the call function and add the variables to the state
+(define first-stmt caar)
 (define evaluate_call_body
   (lambda (body state return continue break throw)
     (cond
       ((null? body) state)
-      ((eq? (caar body) 'return) (return state))
+      ((eq? (first-stmt body) 'return) (return state))
       ((eq? (car body) 'var) (evaluate_call_body (cdr body) (function_declaration (car body) state throw) return break continue throw))
       (else (evaluate_call_body (rest body) (M_state (car body) state return break continue throw) return break continue throw)))))
 
 ;used to declare or assign a value
 (define function_declaration
   (lambda (stmt state)
-    (if (declared? (cadr stmt) (car state))
+    (if (declared? (func-name stmt) (car state))
         (M_assign stmt state)
         (M_declare stmt state))))
 

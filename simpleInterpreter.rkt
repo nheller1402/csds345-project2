@@ -8,22 +8,21 @@
     (call/cc
       (lambda (return)
         (syntax-tree (parser filename) empty return
-                                  (lambda (v1) (error 'error "continue used outside of loop"))
-                                  (lambda (v2) (error 'error "break used outside of loop"))
-                                  (lambda (v3 v4) (error 'error "throw outside of loop")))))))
+                                  (lambda (env) (error 'error "continue used outside of loop"))
+                                  (lambda (env) (error 'error "break used outside of loop"))
+                                  (lambda (v env) (error 'error "throw outside of loop")))))))
 
 (define syntax-tree
   (lambda (stmts state return continue break throw)
     (call/cc
      (lambda (return)
        (if (null? stmts)
-           state
+           (evaluate_function state return continue break throw)
            (syntax-tree (next_stmt stmts) (M_state (current stmts) state return continue break throw) return continue break throw))))))
 
 (define evaluate_function
   (lambda (state return continue break throw)
-    state
-    (evaluate_call_body (cadr (findvar 'main state)) (cons empty state) return break continue throw)))
+    (evaluate_call_body (cadr (findvar 'main state)) state return break continue throw)))
 
 ;;STATE FUNCTIONS
 ;abstractions for state functions
@@ -60,7 +59,7 @@
 ; Creates a new layer for the state.
 (define create_block
   (lambda (state)
-    (list null null state)))
+    (list '() '() state)))
 
 ; Pops the front (most recent) layer from the state.
 (define pop_block
@@ -316,29 +315,11 @@
   (lambda (stmt state return break continue throw)
     (cond
       ((null? (cdddr stmt)) state)
-      (else (insert (cadr stmt) (box (cddr stmt)) state)))))
-
-(define insert
-  (lambda (var val state)
-    (if (declared? var (car state))
-        (error 'error "redeclaring already declared variable")
-        (cons (add_new_block var val (car state)) (cdr state)))))
-
-(define add_new_block
-  (lambda (var val block)
-    (list (cons var (car block)) (cons val (cadr block)))))
+      (else (add_var (cadr stmt) (cddr stmt) state)))))
 
 (define M_call
-  (lambda (stmt state throw)
-    (call/cc
-     (lambda (call)
-      (evaluate_call_body (cadr (findvar (cadr stmt) state))
-      (addParameter (findvar (cadr stmt) state) (evaluateParameter (cddr stmt) state) (append (cons empty (findScope (cadr stmt) state)) state))
-      call
-      (lambda (env) (error 'error "break used outside of loop"))
-      (lambda (env) (error 'error "continue used outside of loop"))
-      throw)
-      ))))
+  (lambda (stmt state)
+    (evaluate_call_body (cadr (findvar (cadr stmt) state)) (addParameter (findvar (cadr stmt) state) (evaluateParameter (cddr stmt) state) (append (cons empty (findScope (cadr stmt) state)) state)))))
 
 (define findScope
   (lambda (function state)
@@ -350,8 +331,9 @@
 (define evaluate_call_body
   (lambda (body state return continue break throw)
     (cond
-      ((null? body) (pop_block state))
-      ((eq? 'var (car body)) (evaluate_call_body (cdr body) (function_declaration (car body) state throw) return break continue throw))
+      ((null? body) state)
+      ((eq? (caar body) 'return) (return state))
+      ((eq? (car body) 'var) (evaluate_call_body (cdr body) (function_declaration (car body) state throw) return break continue throw))
       (else (evaluate_call_body (rest body) (M_state (car body) state return break continue throw) return break continue throw)))))
 
 (define function_declaration
@@ -365,7 +347,7 @@
     (cond
       ((and (null? parameter) (null? value)) state)
       ((or (null? parameter) (null? value)) (error 'error "Mismatched parameters and arguments"))
-      (else (addParameter (cdr parameter) (cdr value) (insert (car parameter) (box (car value)) state))))))
+      (else (addParameter (cdr parameter) (cdr value) (add_var (car parameter) (car value) state))))))
 
 (define evaluateParameter
   (lambda (parameter state)

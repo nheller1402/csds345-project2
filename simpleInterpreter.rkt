@@ -174,7 +174,7 @@
       (else (M_finally (next_stmt stmt) (M_state (current stmt) state return continue break throw) return continue break throw)))))
 
 ;helper function to return statements in finally block
-(define finally-body cadddr)
+(define finally_body cadddr)
 (define next-block cadr)
 (define finally-block
   (lambda (stmt)

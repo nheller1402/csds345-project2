@@ -1,11 +1,14 @@
 #lang racket
-(require "simpleParser.rkt")
+(require "classParser.rkt")
 
 ;;MAIN
 ;calls Mstate for the total state of the program on the parsed version of the file
 (define interpret
-  (lambda (filename)
-    (syntax-tree (parser filename) empty)))
+  (lambda (filename class_name)
+    (display (parser filename))
+    (display (newline))
+    (display (class_name)
+    (syntax-tree (parser filename) empty))))
 
 (define syntax-tree
   (lambda (stmts state)
